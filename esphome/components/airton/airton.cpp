@@ -9,7 +9,9 @@ void AirtonClimate::set_sleep_mode_state(bool state, bool send_ir = false) {
   if (state != this->settings_.sleep_state) {
     this->settings_.sleep_state = state;
 #ifdef USE_SWITCH
-    this->sleep_mode_switch_->publish_state(state);
+    if (this->sleep_mode_switch_ != nullptr) {
+      this->sleep_mode_switch_->publish_state(state);
+    }
 #endif
     this->airton_rtc_.save(&this->settings_);
     if (send_ir)
@@ -23,7 +25,9 @@ void AirtonClimate::set_display_state(bool state, bool send_ir = false) {
   if (state != this->settings_.display_state) {
     this->settings_.display_state = state;
 #ifdef USE_SWITCH
-    this->display_switch_->publish_state(state);
+    if (this->display_switch_ != nullptr) {
+      this->display_switch_->publish_state(state);
+    }
 #endif
     this->airton_rtc_.save(&this->settings_);
     if (send_ir)
@@ -32,6 +36,17 @@ void AirtonClimate::set_display_state(bool state, bool send_ir = false) {
 }
 
 bool AirtonClimate::get_display_state() const { return this->settings_.display_state; }
+
+void AirtonClimate::set_quiet_state(bool state, bool send_ir = false) {
+  if (state != this->settings_.quiet_state) {
+    this->settings_.quiet_state = state;
+    this->airton_rtc_.save(&this->settings_);
+    if (send_ir)
+      this->transmit_state();
+  }
+}
+
+bool AirtonClimate::get_quiet_state() const { return this->settings_.quiet_state; }
 
 void AirtonClimate::set_vertical_direction_state(VerticalDirection state) {
   if (state.to_uint8() != this->settings_.vertical_direction_state.to_uint8()) {
@@ -118,6 +133,11 @@ void AirtonClimate::transmit_state() {
 
   remote_state[3] = 0;
   remote_state[3] |= this->temperature_();
+  // Quiet ("headphones") mode: independent bits in the upper nibble, reverse-engineered
+  // from the original remote. Does NOT touch the Fan field.
+  if (this->get_quiet_state()) {
+    remote_state[3] |= AIRTON_QUIET_NIBBLE;
+  }
 
   remote_state[4] = 0;
   remote_state[4] |= this->get_vertical_direction_state().to_uint8();
@@ -293,6 +313,10 @@ bool AirtonClimate::parse_state_frame_(uint8_t const frame[]) {
   uint8_t temperature = frame[3];
   this->target_temperature =
       (temperature & 0b00001111) + 16;  // Mask the higher half of the byte (unused), add back the offset
+
+  // Quiet ("headphones") mode: upper nibble of byte 3, independent from the Fan field.
+  uint8_t quiet_nibble = frame[3] & 0b11110000;
+  this->set_quiet_state(quiet_nibble == AIRTON_QUIET_NIBBLE);
 
   uint8_t swing_mode = frame[4] & 0b00001111;  // Mask the higher nibble
   if (swing_mode == (uint8_t) VerticalDirection::VERTICAL_DIRECTION_OFF) {
