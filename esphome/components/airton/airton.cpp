@@ -1,10 +1,7 @@
 #include "airton.h"
 #include "esphome/core/log.h"
-
 namespace esphome::airton {
-
 static const char *const TAG = "airton.climate";
-
 void AirtonClimate::set_sleep_mode_state(bool state, bool send_ir = false) {
   if (state != this->settings_.sleep_state) {
     this->settings_.sleep_state = state;
@@ -18,9 +15,7 @@ void AirtonClimate::set_sleep_mode_state(bool state, bool send_ir = false) {
       this->transmit_state();
   }
 }
-
 bool AirtonClimate::get_sleep_mode_state() const { return this->settings_.sleep_state; }
-
 void AirtonClimate::set_display_state(bool state, bool send_ir = false) {
   if (state != this->settings_.display_state) {
     this->settings_.display_state = state;
@@ -34,20 +29,7 @@ void AirtonClimate::set_display_state(bool state, bool send_ir = false) {
       this->transmit_state();
   }
 }
-
 bool AirtonClimate::get_display_state() const { return this->settings_.display_state; }
-
-void AirtonClimate::set_quiet_state(bool state, bool send_ir = false) {
-  if (state != this->settings_.quiet_state) {
-    this->settings_.quiet_state = state;
-    this->airton_rtc_.save(&this->settings_);
-    if (send_ir)
-      this->transmit_state();
-  }
-}
-
-bool AirtonClimate::get_quiet_state() const { return this->settings_.quiet_state; }
-
 void AirtonClimate::set_vertical_direction_state(VerticalDirection state) {
   if (state.to_uint8() != this->settings_.vertical_direction_state.to_uint8()) {
     this->settings_.vertical_direction_state = state;
@@ -71,11 +53,9 @@ void AirtonClimate::set_vertical_direction_state(const std::string &state) {
     this->transmit_state();
   }
 }
-
 VerticalDirection AirtonClimate::get_vertical_direction_state() const {
   return this->settings_.vertical_direction_state;
 }
-
 #ifdef USE_SWITCH
 void AirtonClimate::set_sleep_mode_switch(switch_::Switch *sw) {
   this->sleep_mode_switch_ = sw;
@@ -90,7 +70,6 @@ void AirtonClimate::set_display_switch(switch_::Switch *sw) {
   }
 }
 #endif  // USE_SWITCH
-
 #ifdef USE_SELECT
 void AirtonClimate::set_vertical_direction_select(select::Select *sel) {
   this->vertical_direction_select_ = sel;
@@ -99,11 +78,8 @@ void AirtonClimate::set_vertical_direction_select(select::Select *sel) {
   }
 }
 #endif  // USE_SELECT
-
 uint8_t AirtonClimate::get_previous_mode_() { return previous_mode_; }
-
 void AirtonClimate::set_previous_mode_(uint8_t mode) { previous_mode_ = mode; }
-
 void AirtonClimate::control(const climate::ClimateCall &call) {
   auto swing_mode = call.get_swing_mode();
   if (swing_mode.has_value()) {
@@ -115,50 +91,41 @@ void AirtonClimate::control(const climate::ClimateCall &call) {
   }
   ClimateIR::control(call);
 }
-
 void AirtonClimate::transmit_state() {
   // Sampled valid state
   // Power: On, Mode: 2 (Dry), Fan: 1 (Quiet), Temp: 20C, Swing(V): On, Econo: Off, Turbo: Off, Light: On, Health: On,
   // Sleep: Off. 0x74C461041A11D3
   uint8_t remote_state[AIRTON_STATE_FRAME_SIZE] = {0};
-
   // Header
   remote_state[0] = 0xD3;
   remote_state[1] = 0x11;
-
   remote_state[2] = 0;
   remote_state[2] |= this->operation_mode_();
   remote_state[2] |= (this->fan_speed_() << 4);
   remote_state[2] |= (this->turbo_control_() << 7);
-
   remote_state[3] = 0;
   remote_state[3] |= this->temperature_();
   // Quiet ("headphones") mode: independent bits in the upper nibble, reverse-engineered
-  // from the original remote. Does NOT touch the Fan field.
-  if (this->get_quiet_state()) {
+  // from the original remote. Exposed as a native CLIMATE_FAN_QUIET fan mode rather
+  // than touching the actual Fan field (the real remote leaves Fan at Auto when Quiet
+  // is active).
+  if (this->fan_mode == climate::CLIMATE_FAN_QUIET) {
     remote_state[3] |= AIRTON_QUIET_NIBBLE;
   }
-
   remote_state[4] = 0;
   remote_state[4] |= this->get_vertical_direction_state().to_uint8();
-
   remote_state[5] = this->operation_settings_();
-
   remote_state[6] = 0;
   remote_state[6] |= this->checksum_(remote_state);
-
   ESP_LOGV(TAG, "Sending: %02X %02X %02X %02X %02X %02X %02X", remote_state[6], remote_state[5], remote_state[4],
            remote_state[3], remote_state[2], remote_state[1], remote_state[0]);
-
   // Build payload inside 'data'
   auto transmit = this->transmitter_->transmit();
   auto *data = transmit.get_data();
   data->set_carrier_frequency(AIRTON_IR_FREQUENCY);
-
   // Header
   data->mark(AIRTON_HEADER_MARK);
   data->space(AIRTON_HEADER_SPACE);
-
   // Data
   for (uint8_t payload_byte : remote_state) {
     for (uint8_t payload_bit_cursor = 0; payload_bit_cursor < 8; payload_bit_cursor++) {
@@ -167,14 +134,11 @@ void AirtonClimate::transmit_state() {
       data->space(bit ? AIRTON_ONE_SPACE : AIRTON_ZERO_SPACE);
     }
   }
-
   // Footer
   data->mark(AIRTON_BIT_MARK);
   data->space(AIRTON_MESSAGE_SPACE);
-
   transmit.perform();
 }
-
 uint8_t AirtonClimate::operation_mode_() {
   uint8_t operating_mode = 0b1000;  // First bit is for power state
   switch (this->mode) {
@@ -200,7 +164,6 @@ uint8_t AirtonClimate::operation_mode_() {
   this->set_previous_mode_(operating_mode);
   return operating_mode;
 }
-
 uint16_t AirtonClimate::fan_speed_() {
   uint16_t fan_speed;
   switch (this->fan_mode.value_or(climate::CLIMATE_FAN_ON)) {
@@ -213,18 +176,21 @@ uint16_t AirtonClimate::fan_speed_() {
     case climate::CLIMATE_FAN_HIGH:
       fan_speed = AIRTON_FAN_5;
       break;
+    case climate::CLIMATE_FAN_QUIET:
+      // The real remote leaves the Fan field at Auto when Quiet is engaged;
+      // the dedicated quiet nibble (byte 3) carries the actual setting.
+      fan_speed = AIRTON_FAN_AUTO;
+      break;
     case climate::CLIMATE_FAN_AUTO:
     default:
       fan_speed = AIRTON_FAN_AUTO;
   }
   return fan_speed;
 }
-
 bool AirtonClimate::turbo_control_() {
   bool turbo_control = false;  // My remote seems to always have this set to 0
   return turbo_control;
 }
-
 uint8_t AirtonClimate::temperature_() {
   switch (this->mode) {
     case climate::CLIMATE_MODE_HEAT_COOL:
@@ -236,7 +202,6 @@ uint8_t AirtonClimate::temperature_() {
       return temperature - 16;
   }
 }
-
 // The bits of this packet's byte have the following meanings (from MSB to LSB)
 // Light, Health, Unknown, HeatOn, Unknown, NotAutoOn, Sleep, Econo
 uint8_t AirtonClimate::operation_settings_() {
@@ -250,7 +215,7 @@ uint8_t AirtonClimate::operation_settings_() {
   if (this->get_sleep_mode_state()) {  // Set sleep mode
     settings |= (1 << 1);
   }
-  if (this->get_quiet_state()) {
+  if (this->fan_mode == climate::CLIMATE_FAN_QUIET) {
     // Quiet ("headphones") mode, as captured from the original remote: the
     // previously-unlabeled bit 3 is set, while Health and NotAutoOn are left
     // cleared (unlike the non-quiet default below).
@@ -260,7 +225,6 @@ uint8_t AirtonClimate::operation_settings_() {
   }
   return settings;
 }
-
 // From IRutils.h of IRremoteESP8266 library
 uint8_t AirtonClimate::sum_bytes_(const uint8_t *const start, const uint16_t length) {
   uint8_t checksum = 0;
@@ -274,7 +238,6 @@ uint8_t AirtonClimate::checksum_(const uint8_t *r_state) {
   uint8_t checksum = (uint8_t) (0x7F - this->sum_bytes_(r_state, 6)) ^ 0x2C;
   return checksum;
 }
-
 bool AirtonClimate::parse_state_frame_(uint8_t const frame[]) {
   uint8_t mode = frame[2];
   if (mode & 0b00001000) {        // Check if power state bit is set
@@ -299,7 +262,6 @@ bool AirtonClimate::parse_state_frame_(uint8_t const frame[]) {
     this->mode = climate::CLIMATE_MODE_OFF;
   }
   uint8_t fan_mode = (frame[2] & 0b01110000) >> 4;  // Mask anything but bits 5-7, then shift them to the right
-
   switch (fan_mode) {
     case AIRTON_FAN_1:
     case AIRTON_FAN_2:
@@ -316,15 +278,16 @@ bool AirtonClimate::parse_state_frame_(uint8_t const frame[]) {
       this->fan_mode = climate::CLIMATE_FAN_AUTO;
       break;
   }
-
   uint8_t temperature = frame[3];
   this->target_temperature =
       (temperature & 0b00001111) + 16;  // Mask the higher half of the byte (unused), add back the offset
-
   // Quiet ("headphones") mode: upper nibble of byte 3, independent from the Fan field.
+  // Overrides whatever fan_mode was just derived from the Fan field above, since the
+  // real remote always leaves Fan at Auto when Quiet is engaged.
   uint8_t quiet_nibble = frame[3] & 0b11110000;
-  this->set_quiet_state(quiet_nibble == AIRTON_QUIET_NIBBLE);
-
+  if (quiet_nibble == AIRTON_QUIET_NIBBLE) {
+    this->fan_mode = climate::CLIMATE_FAN_QUIET;
+  }
   uint8_t swing_mode = frame[4] & 0b00001111;  // Mask the higher nibble
   if (swing_mode == (uint8_t) VerticalDirection::VERTICAL_DIRECTION_OFF) {
     this->swing_mode = climate::CLIMATE_SWING_OFF;
@@ -332,17 +295,13 @@ bool AirtonClimate::parse_state_frame_(uint8_t const frame[]) {
     this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
   }
   this->set_vertical_direction_state(static_cast<VerticalDirection::Direction>(swing_mode));
-
   uint8_t display_light = frame[5] & 0b10000000;  // Mask anything but the MSB
   this->set_display_state(display_light != 0);
-
   uint8_t sleep_mode = frame[5] & 0b00000010;  // Mask anything but the second bit
   this->set_sleep_mode_state(sleep_mode != 0);
-
   this->publish_state();
   return true;
 }
-
 bool AirtonClimate::on_receive(remote_base::RemoteReceiveData data) {
   uint8_t remote_state[AIRTON_STATE_FRAME_SIZE] = {};
   // Check header encoding
@@ -350,7 +309,6 @@ bool AirtonClimate::on_receive(remote_base::RemoteReceiveData data) {
     ESP_LOGV(TAG, "Wrong header encoding detected!");
     return false;
   }
-
   // Build state bytes array from raw data received
   for (int i = 0; i < AIRTON_STATE_FRAME_SIZE; i++) {
     for (int j = 0; j < 8; j++) {
@@ -362,13 +320,11 @@ bool AirtonClimate::on_receive(remote_base::RemoteReceiveData data) {
       }
     }
   }
-
   // Check header contents
   if (remote_state[0] != 0xD3 || remote_state[1] != 0x11) {
     ESP_LOGV(TAG, "Wrong header contents: %02X %02X", remote_state[1], remote_state[0]);
     return false;
   }
-
   // Verify received packet checksum
   uint8_t checksum = this->checksum_(remote_state);
   if (remote_state[AIRTON_STATE_FRAME_SIZE - 1] != checksum) {
@@ -376,11 +332,9 @@ bool AirtonClimate::on_receive(remote_base::RemoteReceiveData data) {
              remote_state[AIRTON_STATE_FRAME_SIZE - 1]);
     return false;
   }
-
   // Parse the payload
   ESP_LOGV(TAG, "Received: %02X %02X %02X %02X %02X %02X %02X", remote_state[6], remote_state[5], remote_state[4],
            remote_state[3], remote_state[2], remote_state[1], remote_state[0]);
   return this->parse_state_frame_(remote_state);
 }
-
 }  // namespace esphome::airton
