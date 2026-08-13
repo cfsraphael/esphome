@@ -250,7 +250,14 @@ uint8_t AirtonClimate::operation_settings_() {
   if (this->get_sleep_mode_state()) {  // Set sleep mode
     settings |= (1 << 1);
   }
-  settings |= 0b01000100;  // Set Health and NotAutoOn bits as per default
+  if (this->get_quiet_state()) {
+    // Quiet ("headphones") mode, as captured from the original remote: the
+    // previously-unlabeled bit 3 is set, while Health and NotAutoOn are left
+    // cleared (unlike the non-quiet default below).
+    settings |= (1 << 3);
+  } else {
+    settings |= 0b01000100;  // Set Health and NotAutoOn bits as per default
+  }
   return settings;
 }
 
