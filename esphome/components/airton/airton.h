@@ -33,6 +33,10 @@ const uint8_t AIRTON_FAN_3 = 0b011;
 const uint8_t AIRTON_FAN_4 = 0b100;
 const uint8_t AIRTON_FAN_5 = 0b101;
 
+// Quiet ("headphones") mode: dedicated bits in the upper nibble of byte 3,
+// reverse-engineered from the original remote (unrelated to the Fan field).
+const uint8_t AIRTON_QUIET_NIBBLE = 0xC0;
+
 // IR Transmission
 const uint32_t AIRTON_IR_FREQUENCY = 38000;
 const uint32_t AIRTON_HEADER_MARK = 6630;
@@ -47,9 +51,10 @@ const uint8_t AIRTON_STATE_FRAME_SIZE = 7;
 
 // Specific internal unit settings
 struct AirtonSettings {
-  bool sleep_state;
-  bool display_state;
-  VerticalDirection vertical_direction_state;
+  bool sleep_state{false};
+  bool display_state{true};
+  bool quiet_state{false};
+  VerticalDirection vertical_direction_state{};
 };
 
 // Local vertical direction constants
@@ -88,6 +93,9 @@ class AirtonClimate : public climate_ir::ClimateIR {
   bool get_sleep_mode_state() const;
   void set_display_state(bool state, bool send_ir);
   bool get_display_state() const;
+  // Quiet ("headphones") mode: independent from fan speed, temperature and mode.
+  void set_quiet_state(bool state, bool send_ir);
+  bool get_quiet_state() const;
   void set_vertical_direction_state(VerticalDirection state);
   void set_vertical_direction_state(const std::string &state);
   VerticalDirection get_vertical_direction_state() const;
@@ -95,7 +103,7 @@ class AirtonClimate : public climate_ir::ClimateIR {
 
  private:
   // Save the previous operation mode inside instance
-  uint8_t previous_mode_;
+  uint8_t previous_mode_{AIRTON_MODE_AUTO};
 
  protected:
   uint8_t get_previous_mode_();
